@@ -332,3 +332,13 @@
        (ok true)
    )
 )
+;; Withdraw protocol fees (only contract owner)
+(define-public (withdraw-fees (amount uint))
+   (let ((fees (var-get protocol-fees)))
+   (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
+   (asserts! (<= amount fees) ERR_INSUFFICIENT_FUNDS)
+   (try! (as-contract (stx-transfer? amount tx-sender CONTRACT_OWNER)))
+   (var-set protocol-fees (- fees amount))
+   (ok amount))
+)
+
