@@ -132,5 +132,41 @@
    )
    (map-set user-loans user (unwrap! (as-max-len? (append current-loans loan-id) u50) false)))
 )
+;; public functions
+
+
+;; Deposit STX to lending pool
+(define-public (deposit (amount uint))
+   (begin
+       (asserts! (> amount u0) ERR_INVALID_AMOUNT)
+       (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+       (let (
+           (current-balance (default-to u0 (map-get? user-deposits tx-sender)))
+           (new-balance (+ current-balance amount))
+       )
+       (map-set user-deposits tx-sender new-balance)
+       (var-set total-pool-balance (+ (var-get total-pool-balance) amount))
+       (update-rates)
+       (ok new-balance))
+   )
+)
+
+
+;; Withdraw STX from lending pool
+(define-public (withdraw (amount uint))
+   (let (
+       (user-balance (default-to u0 (map-get? user-deposits tx-sender)))
+       (pool-balance (var-get total-pool-balance))
+   )
+   (asserts! (>= user-balance amount) ERR_INSUFFICIENT_FUNDS)
+   (asserts! (>= pool-balance amount) ERR_POOL_INSUFFICIENT)
+   (try! (as-contract (stx-transfer? amount tx-sender tx-sender)))
+   (map-set user-deposits tx-sender (- user-balance amount))
+   (var-set total-pool-balance (- pool-balance amount))
+   (update-rates)
+   (ok (- user-balance amount)))
+)
+
+
 
 
