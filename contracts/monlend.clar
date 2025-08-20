@@ -45,8 +45,10 @@
    start-block: uint,
    due-block: uint,
    is-active: bool,
- is-liquidated: bool
+   is-liquidated: bool
 })
+
+
 ;; User loan IDs
 (define-map user-loans principal (list 50 uint))
 
@@ -88,8 +90,6 @@
    (match (map-get? loans loan-id)
        loan-data
        (let (
-
-
            (current-debt (calculate-current-debt loan-id))
            (collateral-value (get collateral loan-data))
            (ltv-ratio (/ (* current-debt u100) collateral-value))
@@ -132,6 +132,8 @@
    )
    (map-set user-loans user (unwrap! (as-max-len? (append current-loans loan-id) u50) false)))
 )
+
+
 ;; public functions
 
 
@@ -166,6 +168,8 @@
    (update-rates)
    (ok (- user-balance amount)))
 )
+
+
 ;; Borrow STX with collateral
 (define-public (borrow (amount uint) (collateral uint))
    (let (
@@ -206,6 +210,8 @@
    (update-rates)
    (ok loan-id))
 )
+
+
 ;; Repay loan
 (define-public (repay-loan (loan-id uint))
    (match (map-get? loans loan-id)
@@ -224,7 +230,7 @@
        ;; Return collateral
        (try! (as-contract (stx-transfer? collateral tx-sender borrower)))
       
- ;; Update loan status
+       ;; Update loan status
        (map-set loans loan-id (merge loan-data { is-active: false }))
       
        ;; Update global state
@@ -238,5 +244,91 @@
        (update-rates)
        (ok current-debt)))
        ERR_LOAN_NOT_FOUND
+   )
+)
+
+
+;; Liquidate undercollateralized loan
+(define-public (liquidate-loan (loan-id uint))
+   (match (map-get? loans loan-id)
+       loan-data
+       (let (
+           (borrower (get borrower loan-data))
+           (current-debt (calculate-current-debt loan-id))
+           (collateral (get collateral loan-data))
+           (penalty-amount (/ (* collateral LIQUIDATION_PENALTY) u100))
+           (liquidator-reward (- collateral penalty-amount))
+       )
+       (asserts! (get is-active loan-data) ERR_ALREADY_REPAID)
+       (asserts! (is-liquidatable loan-id) ERR_LIQUIDATION_NOT_ALLOWED)
+      
+       ;; Transfer liquidator reward
+       (try! (as-contract (stx-transfer? liquidator-reward tx-sender tx-sender)))
+      
+       ;; Keep penalty as protocol fee
+       (var-set protocol-fees (+ (var-get protocol-fees) penalty-amount))
+      
+       ;; Mark loan as liquidated
+       (map-set loans loan-id (merge loan-data {
+           is-active: false,
+           is-liquidated: true
+       }))
+      
+       ;; Update global state
+       (let ((principal-amount (get amount loan-data)))
+       (var-set total-borrowed (- (var-get total-borrowed) principal-amount))
+       (update-rates)
+       (ok liquidator-reward)))
+       ERR_LOAN_NOT_FOUND
+   )
+)
+
+
+;; Get loan details
+(define-read-only (get-loan (loan-id uint))
+   (map-get? loans loan-id)
+)
+;; Get user's deposit balance
+(define-read-only (get-user-balance (user principal))
+   (default-to u0 (map-get? user-deposits user))
+)
+
+
+;; Get current debt for a loan
+(define-read-only (get-current-debt (loan-id uint))
+   (calculate-current-debt loan-id)
+)
+
+
+;; Get protocol statistics
+(define-read-only (get-protocol-stats)
+  {
+       total-pool-balance: (var-get total-pool-balance),
+       total-borrowed: (var-get total-borrowed),
+       utilization-rate: (var-get utilization-rate),
+       current-interest-rate: (var-get current-interest-rate),
+       protocol-fees: (var-get protocol-fees)
+   }
+)
+
+
+;; Get user's loans
+(define-read-only (get-user-loans (user principal))
+   (default-to (list) (map-get? user-loans user))
+)
+
+
+;; Check if loan is liquidatable
+(define-read-only (can-liquidate (loan-id uint))
+   (is-liquidatable loan-id)
+)
+
+
+;; Emergency functions (only contract owner)
+(define-public (emergency-pause)
+   (begin
+       (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
+       ;; Could implement pause functionality here
+       (ok true)
    )
 )
