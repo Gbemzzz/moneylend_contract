@@ -166,7 +166,43 @@
    (update-rates)
    (ok (- user-balance amount)))
 )
-
-
-
-
+;; Borrow STX with collateral
+(define-public (borrow (amount uint) (collateral uint))
+   (let (
+       (loan-id (var-get next-loan-id))
+       (pool-balance (var-get total-pool-balance))
+       (ltv-ratio (/ (* amount u100) collateral))
+       (current-rate (var-get current-interest-rate))
+       (due-block (+ block-height u52560)) ;; 1 year from now
+   )
+   (asserts! (>= amount MIN_LOAN_AMOUNT) ERR_INVALID_AMOUNT)
+   (asserts! (<= ltv-ratio MAX_LTV) ERR_COLLATERAL_RATIO_TOO_LOW)
+   (asserts! (>= pool-balance amount) ERR_POOL_INSUFFICIENT)
+   (asserts! (> collateral u0) ERR_INSUFFICIENT_COLLATERAL)
+  
+   ;; Transfer collateral from borrower
+   (try! (stx-transfer? collateral tx-sender (as-contract tx-sender)))
+  
+   ;; Transfer loan amount to borrower
+   (try! (as-contract (stx-transfer? amount tx-sender tx-sender)))
+  
+   ;; Create loan record
+   (map-set loans loan-id {
+       borrower: tx-sender,
+       amount: amount,
+       collateral: collateral,
+       interest-rate: current-rate,
+       start-block: block-height,
+       due-block: due-block,
+       is-active: true,
+       is-liquidated: false
+   })
+  
+   ;; Update global state
+   (add-user-loan tx-sender loan-id)
+   (var-set next-loan-id (+ loan-id u1))
+   (var-set total-pool-balance (- pool-balance amount))
+   (var-set total-borrowed (+ (var-get total-borrowed) amount))
+   (update-rates)
+   (ok loan-id))
+)
