@@ -206,3 +206,37 @@
    (update-rates)
    (ok loan-id))
 )
+;; Repay loan
+(define-public (repay-loan (loan-id uint))
+   (match (map-get? loans loan-id)
+       loan-data
+       (let (
+           (borrower (get borrower loan-data))
+           (current-debt (calculate-current-debt loan-id))
+           (collateral (get collateral loan-data))
+       )
+       (asserts! (is-eq tx-sender borrower) ERR_UNAUTHORIZED)
+       (asserts! (get is-active loan-data) ERR_ALREADY_REPAID)
+      
+       ;; Transfer repayment amount
+       (try! (stx-transfer? current-debt tx-sender (as-contract tx-sender)))
+      
+       ;; Return collateral
+       (try! (as-contract (stx-transfer? collateral tx-sender borrower)))
+      
+ ;; Update loan status
+       (map-set loans loan-id (merge loan-data { is-active: false }))
+      
+       ;; Update global state
+       (let (
+           (principal-amount (get amount loan-data))
+           (interest-earned (- current-debt principal-amount))
+       )
+       (var-set total-pool-balance (+ (var-get total-pool-balance) current-debt))
+       (var-set total-borrowed (- (var-get total-borrowed) principal-amount))
+       (var-set protocol-fees (+ (var-get protocol-fees) (/ interest-earned u10))) ;; 10% of interest as protocol fee
+       (update-rates)
+       (ok current-debt)))
+       ERR_LOAN_NOT_FOUND
+   )
+)
